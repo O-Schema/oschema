@@ -1,5 +1,5 @@
 source: stripe
-version: "2024-01"
+version: "2025-04"
 type_field: "type"
 type_mapping:
   charge.succeeded: payment.charge_succeeded
@@ -33,6 +33,9 @@ type_mapping:
   refund.updated: refund.updated
   payout.paid: payout.paid
   payout.failed: payout.failed
+  billing.alert.triggered: billing.alert_triggered
+  tax.settings.updated: tax.settings_updated
+  entitlements.active_entitlement_summary.updated: entitlements.updated
 fields:
   external_id: id
   timestamp: created

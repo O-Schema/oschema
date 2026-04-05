@@ -1,5 +1,5 @@
 source: github
-version: "2024-01"
+version: "2025-01"
 type_header: "X-GitHub-Event"
 type_mapping:
   push: repo.push
@@ -19,6 +19,8 @@ type_mapping:
   deployment: deploy.created
   deployment_status: deploy.status
   status: repo.commit_status
+  sub_issues: repo.sub_issues
+  issue_types: repo.issue_types
 fields:
   external_id: action
   timestamp: ""

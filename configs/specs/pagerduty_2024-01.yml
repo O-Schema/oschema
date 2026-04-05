@@ -1,28 +1,57 @@
 source: pagerduty
 version: "2024-01"
-
-# PagerDuty puts event type in the body at event.event_type
 type_field: "event.event_type"
-
 type_mapping:
   incident.triggered: incident.triggered
   incident.acknowledged: incident.acknowledged
+  incident.unacknowledged: incident.unacknowledged
   incident.resolved: incident.resolved
   incident.escalated: incident.escalated
   incident.reassigned: incident.reassigned
   incident.delegated: incident.delegated
-
+  incident.reopened: incident.reopened
+  incident.priority_updated: incident.priority_updated
+  incident.responder.added: incident.responder_added
+  incident.responder.replied: incident.responder_replied
+  incident.status_update_published: incident.status_update
+  incident.annotated: incident.note_added
+  service.created: service.created
+  service.updated: service.updated
 fields:
   external_id: event.data.id
   timestamp: event.occurred_at
   data:
     event_id: event.id
+    resource_type: event.resource_type
     title: event.data.title
     status: event.data.status
     urgency: event.data.urgency
+    incident_number: event.data.number
+    incident_key: event.data.incident_key
     html_url: event.data.html_url
-    service_id: event.data.service.id
-    service_name: event.data.service.name
-    priority: event.data.priority.summary
-    escalation_policy: event.data.escalation_policy.summary
+    self_url: event.data.self
     created_at: event.data.created_at
+    resolved_at: event.data.resolved_at
+    last_status_change_at: event.data.last_status_change_at
+    service_id: event.data.service.id
+    service_name: event.data.service.summary
+    service_url: event.data.service.html_url
+    escalation_policy_id: event.data.escalation_policy.id
+    escalation_policy: event.data.escalation_policy.summary
+    priority_id: event.data.priority.id
+    priority: event.data.priority.summary
+    priority_name: event.data.priority.name
+    priority_order: event.data.priority.order
+    agent_type: event.agent.type
+    agent_id: event.agent.id
+    agent_name: event.agent.summary
+    agent_url: event.agent.html_url
+    client_name: event.client.name
+    client_url: event.client.url
+    conference_number: event.data.conference_bridge.conference_number
+    conference_url: event.data.conference_bridge.conference_url
+    body_details: event.data.body.details
+    resolve_reason_type: event.data.resolve_reason.type
+    alert_count_all: event.data.alert_counts.all
+    alert_count_triggered: event.data.alert_counts.triggered
+    alert_count_resolved: event.data.alert_counts.resolved

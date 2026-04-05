@@ -1,9 +1,6 @@
 source: slack
 version: "2024-01"
-
-# Slack puts event type in the body at event.type
 type_field: "event.type"
-
 type_mapping:
   message: chat.message
   app_mention: chat.mention
@@ -14,8 +11,16 @@ type_mapping:
   channel_created: channel.created
   channel_deleted: channel.deleted
   channel_rename: channel.renamed
+  channel_archive: channel.archived
+  channel_unarchive: channel.unarchived
   team_join: team.member_joined
-
+  user_change: user.updated
+  file_shared: file.shared
+  file_deleted: file.deleted
+  pin_added: pin.added
+  pin_removed: pin.removed
+  emoji_changed: emoji.changed
+  app_home_opened: app.home_opened
 fields:
   external_id: event_id
   timestamp: event_time
@@ -26,8 +31,23 @@ fields:
     channel: event.channel
     text: event.text
     ts: event.ts
+    thread_ts: event.thread_ts
+    parent_user_id: event.parent_user_id
     channel_type: event.channel_type
-    reaction: event.reaction
     subtype: event.subtype
+    bot_id: event.bot_id
+    edited_user: event.edited.user
+    edited_ts: event.edited.ts
+    reaction: event.reaction
+    item_user: event.item_user
     item_type: event.item.type
     item_channel: event.item.channel
+    item_ts: event.item.ts
+    event_ts: event.event_ts
+    client_msg_id: event.client_msg_id
+    team: event.team
+    inviter: event.inviter
+    channel_name: event.channel.name
+    channel_creator: event.channel.creator
+    channel_created: event.channel.created
+    is_ext_shared: is_ext_shared_channel

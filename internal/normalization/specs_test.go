@@ -59,14 +59,50 @@ func TestNormalizeStripe(t *testing.T) {
 		"type":        "charge.succeeded",
 		"created":     "1720000000",
 		"api_version": "2024-01-01",
+		"livemode":    true,
+		"request": map[string]any{
+			"idempotency_key": "idem-123",
+		},
 		"data": map[string]any{
 			"object": map[string]any{
-				"id":             "ch_xyz789",
-				"amount":         float64(5000),
-				"currency":       "usd",
-				"status":         "succeeded",
-				"customer":       "cus_abc",
-				"payment_intent": "pi_def",
+				"id":              "ch_xyz789",
+				"object":          "charge",
+				"amount":          float64(5000),
+				"amount_captured": float64(5000),
+				"amount_refunded": float64(0),
+				"currency":        "usd",
+				"status":          "succeeded",
+				"customer":        "cus_abc",
+				"description":     "Test charge",
+				"payment_intent":  "pi_def",
+				"payment_method":  "pm_card_visa",
+				"receipt_email":   "buyer@example.com",
+				"receipt_url":     "https://pay.stripe.com/receipts/...",
+				"billing_details": map[string]any{
+					"name":  "Jane Doe",
+					"email": "jane@example.com",
+					"phone": "+1234567890",
+					"address": map[string]any{
+						"city":        "San Francisco",
+						"country":     "US",
+						"postal_code": "94102",
+					},
+				},
+				"payment_method_details": map[string]any{
+					"card": map[string]any{
+						"brand":   "visa",
+						"last4":   "4242",
+						"exp_month": float64(12),
+						"exp_year":  float64(2025),
+						"funding": "credit",
+						"network": "visa",
+					},
+				},
+				"outcome": map[string]any{
+					"risk_level":     "normal",
+					"risk_score":     float64(15),
+					"seller_message": "Payment complete.",
+				},
 			},
 		},
 	}
@@ -81,17 +117,114 @@ func TestNormalizeStripe(t *testing.T) {
 	if evt.ExternalID != "evt_1abc123" {
 		t.Errorf("ExternalID = %q, want %q", evt.ExternalID, "evt_1abc123")
 	}
+	// Core fields
 	if evt.Data["object_id"] != "ch_xyz789" {
-		t.Errorf("Data[object_id] = %v, want %q", evt.Data["object_id"], "ch_xyz789")
+		t.Errorf("Data[object_id] = %v", evt.Data["object_id"])
+	}
+	if evt.Data["object_type"] != "charge" {
+		t.Errorf("Data[object_type] = %v", evt.Data["object_type"])
 	}
 	if evt.Data["amount"] != float64(5000) {
-		t.Errorf("Data[amount] = %v, want 5000", evt.Data["amount"])
+		t.Errorf("Data[amount] = %v", evt.Data["amount"])
 	}
-	if evt.Data["currency"] != "usd" {
-		t.Errorf("Data[currency] = %v, want %q", evt.Data["currency"], "usd")
+	if evt.Data["amount_captured"] != float64(5000) {
+		t.Errorf("Data[amount_captured] = %v", evt.Data["amount_captured"])
 	}
-	if evt.Data["customer"] != "cus_abc" {
-		t.Errorf("Data[customer] = %v, want %q", evt.Data["customer"], "cus_abc")
+	if evt.Data["description"] != "Test charge" {
+		t.Errorf("Data[description] = %v", evt.Data["description"])
+	}
+	// Billing details
+	if evt.Data["billing_name"] != "Jane Doe" {
+		t.Errorf("Data[billing_name] = %v", evt.Data["billing_name"])
+	}
+	if evt.Data["billing_email"] != "jane@example.com" {
+		t.Errorf("Data[billing_email] = %v", evt.Data["billing_email"])
+	}
+	if evt.Data["billing_city"] != "San Francisco" {
+		t.Errorf("Data[billing_city] = %v", evt.Data["billing_city"])
+	}
+	if evt.Data["billing_country"] != "US" {
+		t.Errorf("Data[billing_country] = %v", evt.Data["billing_country"])
+	}
+	// Card details
+	if evt.Data["card_brand"] != "visa" {
+		t.Errorf("Data[card_brand] = %v", evt.Data["card_brand"])
+	}
+	if evt.Data["card_last4"] != "4242" {
+		t.Errorf("Data[card_last4] = %v", evt.Data["card_last4"])
+	}
+	if evt.Data["card_funding"] != "credit" {
+		t.Errorf("Data[card_funding] = %v", evt.Data["card_funding"])
+	}
+	// Risk/outcome
+	if evt.Data["risk_level"] != "normal" {
+		t.Errorf("Data[risk_level] = %v", evt.Data["risk_level"])
+	}
+	if evt.Data["seller_message"] != "Payment complete." {
+		t.Errorf("Data[seller_message] = %v", evt.Data["seller_message"])
+	}
+	// Envelope fields
+	if evt.Data["livemode"] != true {
+		t.Errorf("Data[livemode] = %v", evt.Data["livemode"])
+	}
+	if evt.Data["api_version"] != "2024-01-01" {
+		t.Errorf("Data[api_version] = %v", evt.Data["api_version"])
+	}
+	if evt.Data["idempotency_key"] != "idem-123" {
+		t.Errorf("Data[idempotency_key] = %v", evt.Data["idempotency_key"])
+	}
+}
+
+func TestNormalizeStripe2025(t *testing.T) {
+	reg := adapters.NewRegistry()
+	if err := reg.LoadFS(specs.Embedded); err != nil {
+		t.Fatalf("LoadFS: %v", err)
+	}
+	spec, err := reg.Resolve("stripe", "2025-04")
+	if err != nil {
+		t.Fatalf("Resolve stripe 2025-04: %v", err)
+	}
+
+	// 2025 spec should have new event types
+	if _, ok := spec.TypeMapping["billing.alert.triggered"]; !ok {
+		t.Error("2025 spec missing billing.alert.triggered type mapping")
+	}
+	if _, ok := spec.TypeMapping["entitlements.active_entitlement_summary.updated"]; !ok {
+		t.Error("2025 spec missing entitlements type mapping")
+	}
+
+	// Should still handle regular events
+	raw := map[string]any{
+		"id":   "evt_2025",
+		"type": "charge.succeeded",
+		"data": map[string]any{
+			"object": map[string]any{
+				"id":     "ch_2025",
+				"amount": float64(9900),
+			},
+		},
+	}
+	evt, err := Normalize(spec, "charge.succeeded", raw)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if evt.Type != "payment.charge_succeeded" {
+		t.Errorf("Type = %q", evt.Type)
+	}
+}
+
+func TestNormalizeGitHub2025(t *testing.T) {
+	reg := adapters.NewRegistry()
+	if err := reg.LoadFS(specs.Embedded); err != nil {
+		t.Fatalf("LoadFS: %v", err)
+	}
+	spec, err := reg.Resolve("github", "2025-01")
+	if err != nil {
+		t.Fatalf("Resolve github 2025-01: %v", err)
+	}
+
+	if _, ok := spec.TypeMapping["sub_issues"]; !ok {
+		t.Error("2025 spec missing sub_issues type mapping")
 	}
 }
 
@@ -124,17 +257,26 @@ func TestNormalizeStripeSubscription(t *testing.T) {
 func TestNormalizeGitHubPush(t *testing.T) {
 	spec := loadSpec(t, "github")
 	raw := map[string]any{
-		"ref":    "refs/heads/main",
-		"before": "aaa111",
-		"after":  "bbb222",
-		"pusher": map[string]any{"name": "octocat", "email": "octo@github.com"},
-		"sender": map[string]any{"login": "octocat"},
+		"ref":     "refs/heads/main",
+		"before":  "aaa111",
+		"after":   "bbb222",
+		"created": false,
+		"deleted": false,
+		"forced":  false,
+		"compare": "https://github.com/octocat/hello-world/compare/aaa111...bbb222",
+		"pusher":  map[string]any{"name": "octocat", "email": "octo@github.com"},
+		"sender":  map[string]any{"login": "octocat", "id": float64(1), "type": "User"},
 		"repository": map[string]any{
-			"full_name": "octocat/hello-world",
+			"full_name":      "octocat/hello-world",
+			"private":        false,
+			"default_branch": "main",
+			"html_url":       "https://github.com/octocat/hello-world",
 		},
 		"head_commit": map[string]any{
-			"id":      "bbb222",
-			"message": "Update README.md",
+			"id":        "bbb222",
+			"message":   "Update README.md",
+			"timestamp": "2024-07-15T14:30:00Z",
+			"author":    map[string]any{"name": "Octocat", "email": "octo@github.com"},
 		},
 	}
 
@@ -146,16 +288,37 @@ func TestNormalizeGitHubPush(t *testing.T) {
 		t.Errorf("Type = %q, want %q", evt.Type, "repo.push")
 	}
 	if evt.Data["repository"] != "octocat/hello-world" {
-		t.Errorf("Data[repository] = %v, want %q", evt.Data["repository"], "octocat/hello-world")
+		t.Errorf("Data[repository] = %v", evt.Data["repository"])
 	}
 	if evt.Data["sender"] != "octocat" {
-		t.Errorf("Data[sender] = %v, want %q", evt.Data["sender"], "octocat")
+		t.Errorf("Data[sender] = %v", evt.Data["sender"])
+	}
+	if evt.Data["sender_type"] != "User" {
+		t.Errorf("Data[sender_type] = %v", evt.Data["sender_type"])
 	}
 	if evt.Data["ref"] != "refs/heads/main" {
-		t.Errorf("Data[ref] = %v, want %q", evt.Data["ref"], "refs/heads/main")
+		t.Errorf("Data[ref] = %v", evt.Data["ref"])
+	}
+	if evt.Data["compare"] != "https://github.com/octocat/hello-world/compare/aaa111...bbb222" {
+		t.Errorf("Data[compare] = %v", evt.Data["compare"])
+	}
+	if evt.Data["repo_default_branch"] != "main" {
+		t.Errorf("Data[repo_default_branch] = %v", evt.Data["repo_default_branch"])
 	}
 	if evt.Data["head_commit_message"] != "Update README.md" {
 		t.Errorf("Data[head_commit_message] = %v", evt.Data["head_commit_message"])
+	}
+	if evt.Data["head_commit_timestamp"] != "2024-07-15T14:30:00Z" {
+		t.Errorf("Data[head_commit_timestamp] = %v", evt.Data["head_commit_timestamp"])
+	}
+	if evt.Data["head_commit_author"] != "Octocat" {
+		t.Errorf("Data[head_commit_author] = %v", evt.Data["head_commit_author"])
+	}
+	if evt.Data["pusher_name"] != "octocat" {
+		t.Errorf("Data[pusher_name] = %v", evt.Data["pusher_name"])
+	}
+	if evt.Data["pusher_email"] != "octo@github.com" {
+		t.Errorf("Data[pusher_email] = %v", evt.Data["pusher_email"])
 	}
 }
 
@@ -385,8 +548,8 @@ func TestNormalizePagerDutyIncident(t *testing.T) {
 				"urgency":  "high",
 				"html_url": "https://pagerduty.com/incidents/PABC123",
 				"service": map[string]any{
-					"id":   "PSVC001",
-					"name": "Production DB",
+					"id":      "PSVC001",
+					"summary": "Production DB",
 				},
 				"priority": map[string]any{
 					"summary": "P1",

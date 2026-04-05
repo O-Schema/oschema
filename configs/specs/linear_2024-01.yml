@@ -1,14 +1,10 @@
 source: linear
 version: "2024-01"
-
-# Linear puts event type as action + type in the body
 type_field: "action"
-
 type_mapping:
   create: issue.created
   update: issue.updated
   remove: issue.deleted
-
 fields:
   external_id: data.id
   timestamp: data.updatedAt
@@ -16,13 +12,40 @@ fields:
     identifier: data.identifier
     title: data.title
     description: data.description
+    number: data.number
     priority: data.priority
+    priority_label: data.priorityLabel
+    estimate: data.estimate
+    url: data.url
+    branch_name: data.branchName
+    due_date: data.dueDate
     state: data.state.name
+    state_type: data.state.type
+    state_color: data.state.color
     assignee: data.assignee.name
     assignee_email: data.assignee.email
+    assignee_id: data.assignee.id
+    creator: data.creator.name
+    creator_email: data.creator.email
     team: data.team.name
     team_key: data.team.key
+    team_id: data.team.id
     project: data.project.name
+    project_id: data.project.id
+    cycle_number: data.cycle.number
+    cycle_name: data.cycle.name
+    parent_id: data.parent.id
+    parent_identifier: data.parent.identifier
+    parent_title: data.parent.title
     labels: data.labels
     created_at: data.createdAt
+    started_at: data.startedAt
+    completed_at: data.completedAt
+    canceled_at: data.canceledAt
+    archived_at: data.archivedAt
+    trashed: data.trashed
+    sla_breaches_at: data.slaBreachesAt
+    customer_ticket_count: data.customerTicketCount
     resource_type: type
+    organization_id: organizationId
+    webhook_id: webhookId

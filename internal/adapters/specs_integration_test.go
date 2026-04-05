@@ -12,46 +12,52 @@ func TestAllEmbeddedSpecsLoad(t *testing.T) {
 		t.Fatalf("LoadFS: %v", err)
 	}
 
-	expected := map[string]string{
-		"shopify":   "2024-07",
-		"stripe":    "2024-01",
-		"github":    "2024-01",
-		"slack":     "2024-01",
-		"jira":      "2024-01",
-		"linear":    "2024-01",
-		"pagerduty": "2024-01",
-		"sendgrid":  "2024-01",
-		"discord":   "2024-01",
-		"twilio":    "2024-01",
+	// All specs: source -> []versions
+	expected := map[string][]string{
+		"shopify":   {"2024-07"},
+		"stripe":    {"2024-01", "2025-04"},
+		"github":    {"2024-01", "2025-01"},
+		"slack":     {"2024-01"},
+		"jira":      {"2024-01"},
+		"linear":    {"2024-01"},
+		"pagerduty": {"2024-01"},
+		"sendgrid":  {"2024-01"},
+		"discord":   {"2024-01"},
+		"twilio":    {"2024-01"},
+	}
+
+	totalExpected := 0
+	for _, versions := range expected {
+		totalExpected += len(versions)
 	}
 
 	list := reg.List()
-	if len(list) != len(expected) {
-		t.Errorf("loaded %d specs, want %d", len(list), len(expected))
+	if len(list) != totalExpected {
+		t.Errorf("loaded %d specs, want %d", len(list), totalExpected)
 		for _, s := range list {
 			t.Logf("  loaded: %s v%s", s.Source, s.Version)
 		}
 	}
 
-	for source, version := range expected {
-		spec, err := reg.Resolve(source, version)
-		if err != nil {
-			t.Errorf("Resolve(%q, %q): %v", source, version, err)
-			continue
-		}
-		if spec.Source != source {
-			t.Errorf("spec.Source = %q, want %q", spec.Source, source)
-		}
-		if spec.Version != version {
-			t.Errorf("spec.Version = %q, want %q", spec.Version, version)
-		}
-		// Every spec must have either type_header or type_field
-		if spec.TypeHeader == "" && spec.TypeField == "" {
-			t.Errorf("spec %s: no type_header or type_field defined", source)
-		}
-		// Every spec must have at least one type mapping
-		if len(spec.TypeMapping) == 0 {
-			t.Errorf("spec %s: no type_mapping entries", source)
+	for source, versions := range expected {
+		for _, version := range versions {
+			spec, err := reg.Resolve(source, version)
+			if err != nil {
+				t.Errorf("Resolve(%q, %q): %v", source, version, err)
+				continue
+			}
+			if spec.Source != source {
+				t.Errorf("spec.Source = %q, want %q", spec.Source, source)
+			}
+			if spec.Version != version {
+				t.Errorf("spec.Version = %q, want %q", spec.Version, version)
+			}
+			if spec.TypeHeader == "" && spec.TypeField == "" {
+				t.Errorf("spec %s v%s: no type_header or type_field defined", source, version)
+			}
+			if len(spec.TypeMapping) == 0 {
+				t.Errorf("spec %s v%s: no type_mapping entries", source, version)
+			}
 		}
 	}
 }

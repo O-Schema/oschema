@@ -1,9 +1,6 @@
 source: jira
 version: "2024-01"
-
-# Jira puts event type in the body at webhookEvent
 type_field: "webhookEvent"
-
 type_mapping:
   "jira:issue_created": issue.created
   "jira:issue_updated": issue.updated
@@ -12,21 +9,69 @@ type_mapping:
   "comment_updated": issue.comment_updated
   "comment_deleted": issue.comment_deleted
   "worklog_created": issue.worklog_created
+  "worklog_updated": issue.worklog_updated
+  "worklog_deleted": issue.worklog_deleted
   "sprint_started": sprint.started
   "sprint_closed": sprint.closed
-
+  "sprint_created": sprint.created
+  "board_created": board.created
+  "issuelink_created": issuelink.created
+  "issuelink_deleted": issuelink.deleted
 fields:
   external_id: issue.key
   timestamp: timestamp
   data:
     issue_id: issue.id
     issue_key: issue.key
+    issue_self: issue.self
     summary: issue.fields.summary
+    description: issue.fields.description
     status: issue.fields.status.name
+    status_id: issue.fields.status.id
+    status_category: issue.fields.status.statusCategory.name
+    status_category_key: issue.fields.status.statusCategory.key
     priority: issue.fields.priority.name
+    priority_id: issue.fields.priority.id
     issue_type: issue.fields.issuetype.name
+    issue_type_id: issue.fields.issuetype.id
+    is_subtask: issue.fields.issuetype.subtask
     project_key: issue.fields.project.key
+    project_name: issue.fields.project.name
+    project_id: issue.fields.project.id
+    project_type: issue.fields.project.projectTypeKey
     assignee: issue.fields.assignee.displayName
     assignee_email: issue.fields.assignee.emailAddress
+    assignee_account_id: issue.fields.assignee.accountId
+    assignee_active: issue.fields.assignee.active
     reporter: issue.fields.reporter.displayName
+    reporter_email: issue.fields.reporter.emailAddress
+    reporter_account_id: issue.fields.reporter.accountId
+    creator: issue.fields.creator.displayName
+    resolution: issue.fields.resolution.name
+    created: issue.fields.created
+    updated: issue.fields.updated
+    resolution_date: issue.fields.resolutiondate
+    due_date: issue.fields.duedate
+    environment: issue.fields.environment
+    votes: issue.fields.votes.votes
+    watches: issue.fields.watches.watchCount
+    time_spent: issue.fields.timetracking.timeSpent
+    time_spent_seconds: issue.fields.timetracking.timeSpentSeconds
+    original_estimate: issue.fields.timetracking.originalEstimate
+    remaining_estimate: issue.fields.timetracking.remainingEstimate
+    parent_key: issue.fields.parent.key
+    parent_summary: issue.fields.parent.fields.summary
+    sprint_name: issue.fields.sprint.name
+    sprint_state: issue.fields.sprint.state
+    sprint_start: issue.fields.sprint.startDate
+    sprint_end: issue.fields.sprint.endDate
     actor: user.displayName
+    actor_email: user.emailAddress
+    actor_account_id: user.accountId
+    event_type_name: issue_event_type_name
+    changelog_id: changelog.id
+    comment_id: comment.id
+    comment_body: comment.body
+    comment_author: comment.author.displayName
+    comment_created: comment.created
+    comment_updated: comment.updated
