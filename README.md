@@ -77,7 +77,7 @@ redis-server &
 ./oschema serve
 ```
 
-The server starts on port 8080 with 10 built-in adapter specs.
+The server starts on port 8080 with 12 built-in adapter specs (10 sources, including 2025 versions for Stripe and GitHub).
 
 ### Built-in Integrations
 
@@ -146,31 +146,31 @@ Create a YAML spec file — no code changes needed.
 
 ### 1. Create the Spec File
 
-Create `specs/stripe_2024-01.yml`:
+Create `specs/my-service_2025-01.yml`:
 
 ```yaml
-source: stripe
-version: "2024-01"
+source: my-service
+version: "2025-01"
 
-# HTTP header containing the event type
-type_header: "Stripe-Event-Type"
+# Where to find the event type — pick ONE:
+type_header: "X-Event-Type"      # from an HTTP header
+# type_field: "event.type"       # OR from a JSON body field (dot-notation)
 
 # Map source event types to your canonical types
 type_mapping:
-  charge.succeeded: payment.completed
-  charge.failed: payment.failed
-  customer.created: customer.created
-  invoice.paid: invoice.paid
+  order.created: order.created
+  order.updated: order.updated
+  user.signup: user.created
 
 # Field extraction (dot-notation into the raw JSON payload)
 fields:
   external_id: id
-  timestamp: created
+  timestamp: created_at
   data:
-    amount: data.object.amount
-    currency: data.object.currency
-    customer_id: data.object.customer
-    receipt_email: data.object.receipt_email
+    user_id: user.id
+    email: user.email
+    amount: order.total
+    currency: order.currency
 ```
 
 ### 2. Run with Custom Specs Directory
@@ -182,20 +182,14 @@ fields:
 ### 3. Send Events
 
 ```bash
-curl -X POST http://localhost:8080/ingest/stripe \
+curl -X POST http://localhost:8080/ingest/my-service \
   -H "Content-Type: application/json" \
-  -H "Stripe-Event-Type: charge.succeeded" \
+  -H "X-Event-Type: order.created" \
   -d '{
-    "id": "evt_abc123",
-    "created": "2024-01-15T10:30:00Z",
-    "data": {
-      "object": {
-        "amount": 5000,
-        "currency": "usd",
-        "customer": "cus_xyz",
-        "receipt_email": "buyer@example.com"
-      }
-    }
+    "id": "ord_abc123",
+    "created_at": "2025-01-15T10:30:00Z",
+    "user": {"id": "usr_xyz", "email": "buyer@example.com"},
+    "order": {"total": 5000, "currency": "usd"}
   }'
 ```
 
@@ -205,7 +199,8 @@ curl -X POST http://localhost:8080/ingest/stripe \
 |-------|-------------|
 | `source` | Source name (matches URL path `/ingest/{source}`) |
 | `version` | Spec version string |
-| `type_header` | HTTP header name containing the source event type |
+| `type_header` | HTTP header containing the event type (use this OR `type_field`) |
+| `type_field` | JSON body field containing the event type, dot-notation (use this OR `type_header`) |
 | `type_mapping` | Map of source event type → canonical event type |
 | `fields.external_id` | Dot-notation path to the unique ID in the payload |
 | `fields.timestamp` | Dot-notation path to the event timestamp (RFC3339) |
@@ -389,6 +384,462 @@ oschema uses the following Redis keys:
 | `oschema:event_index` | Hash | Event ID → JSON lookup index |
 | `oschema:deadletter` | Stream | Failed events after max retries |
 | `dedupe:{source}:{external_id}` | String | Deduplication keys (TTL-based) |
+
+## Production Deployment
+
+### Infrastructure Requirements
+
+```
+┌──────────────┐     ┌─────────────────┐     ┌───────────────┐
+│   Internet   │────▶│  Load Balancer  │────▶│   oschema     │
+│  (webhooks)  │     │  (nginx/Caddy)  │     │  instance(s)  │
+└──────────────┘     │  TLS termination│     └───────┬───────┘
+                     │  rate limiting   │             │
+                     └─────────────────┘             ▼
+                                              ┌───────────────┐
+                                              │  Redis 7+     │
+                                              │  (Streams)    │
+                                              └───────────────┘
+```
+
+**Minimum requirements:**
+- 1 oschema instance (single binary, ~12MB)
+- Redis 7+ with persistence enabled (AOF recommended)
+- A reverse proxy for TLS termination (nginx, Caddy, or cloud LB)
+
+**Recommended for production:**
+- 2+ oschema instances behind a load balancer
+- Redis with AOF persistence + RDB snapshots
+- Separate Redis instance or cluster for high-throughput workloads
+- Monitoring stack (Prometheus + Grafana or similar)
+
+### Docker
+
+```dockerfile
+# Dockerfile
+FROM golang:1.22-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /oschema ./cmd/server/
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /oschema /usr/local/bin/oschema
+EXPOSE 8080
+ENTRYPOINT ["oschema"]
+CMD ["serve"]
+```
+
+```bash
+# Build and run
+docker build -t oschema .
+docker run -p 8080:8080 \
+  -e OSCHEMA_REDIS_URL=redis://redis:6379 \
+  oschema
+```
+
+### Docker Compose
+
+```yaml
+# docker-compose.yml
+version: "3.9"
+services:
+  oschema:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      OSCHEMA_REDIS_URL: redis://redis:6379
+      OSCHEMA_WORKERS: "4"
+      OSCHEMA_MAX_RETRIES: "5"
+      OSCHEMA_DEDUPE_TTL: "24h"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+```
+
+```bash
+docker compose up -d
+```
+
+### Kubernetes
+
+```yaml
+# k8s/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oschema
+  labels:
+    app: oschema
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: oschema
+  template:
+    metadata:
+      labels:
+        app: oschema
+    spec:
+      containers:
+        - name: oschema
+          image: ghcr.io/o-schema/oschema:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: OSCHEMA_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oschema-secrets
+                  key: redis-url
+            - name: OSCHEMA_WORKERS
+              value: "4"
+            - name: OSCHEMA_MAX_RETRIES
+              value: "5"
+            - name: OSCHEMA_DEDUPE_TTL
+              value: "24h"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oschema
+spec:
+  selector:
+    app: oschema
+  ports:
+    - port: 80
+      targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oschema
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+    - hosts:
+        - webhooks.yourdomain.com
+      secretName: oschema-tls
+  rules:
+    - host: webhooks.yourdomain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: oschema
+                port:
+                  number: 80
+```
+
+### Reverse Proxy (nginx)
+
+oschema does not handle TLS directly. Use a reverse proxy for TLS termination, rate limiting, and request filtering.
+
+```nginx
+# /etc/nginx/conf.d/oschema.conf
+upstream oschema {
+    server 127.0.0.1:8080;
+    server 127.0.0.1:8081;  # second instance
+    keepalive 32;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name webhooks.yourdomain.com;
+
+    ssl_certificate     /etc/letsencrypt/live/webhooks.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/webhooks.yourdomain.com/privkey.pem;
+
+    # Rate limiting: 100 requests/sec per IP
+    limit_req_zone $binary_remote_addr zone=webhooks:10m rate=100r/s;
+
+    # Max request body size (webhook payloads)
+    client_max_body_size 1m;
+
+    location /ingest/ {
+        limit_req zone=webhooks burst=200 nodelay;
+
+        proxy_pass http://oschema;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Timeouts
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
+
+    location /health {
+        proxy_pass http://oschema;
+        access_log off;
+    }
+
+    # Block everything else
+    location / {
+        return 404;
+    }
+}
+```
+
+### Horizontal Scaling
+
+oschema scales horizontally out of the box. Multiple instances share the same Redis Streams consumer group (`oschema-workers`), so events are automatically distributed across workers.
+
+```
+                  ┌──────────────┐
+                  │  Instance 1  │──┐
+  Load Balancer──▶│  4 workers   │  │
+                  └──────────────┘  │
+                  ┌──────────────┐  │    ┌─────────┐
+                  │  Instance 2  │──┼───▶│  Redis   │
+                  │  4 workers   │  │    │ Streams  │
+                  └──────────────┘  │    └─────────┘
+                  ┌──────────────┐  │
+                  │  Instance 3  │──┘
+                  │  4 workers   │
+                  └──────────────┘
+```
+
+**How it works:**
+- Each instance has its own unique consumer name (`worker-{PID}-{id}`)
+- All instances join the same consumer group (`oschema-workers`)
+- Redis Streams guarantees each message is delivered to exactly one consumer
+- The HTTP endpoint is stateless — any instance can handle any request
+- Deduplication is centralized in Redis, so it works across all instances
+
+**Scaling guidelines:**
+- Start with 1 instance, 4 workers
+- Add instances when queue depth grows (monitor `XLEN oschema:queue`)
+- Each instance handles ~1,000-5,000 webhooks/sec depending on payload size
+- Workers are the bottleneck, not the HTTP handler — increase `--workers` first
+
+### Redis Configuration
+
+Production Redis should be configured for durability and bounded memory:
+
+```conf
+# redis.conf
+
+# Persistence: AOF with fsync every second (good balance of durability/performance)
+appendonly yes
+appendfsync everysec
+
+# RDB snapshots as backup
+save 900 1
+save 300 10
+save 60 10000
+
+# Memory limit — prevent OOM
+maxmemory 2gb
+maxmemory-policy noeviction  # IMPORTANT: never evict stream data
+
+# Connection limits
+maxclients 10000
+timeout 300
+
+# Slow log for debugging
+slowlog-log-slower-than 10000
+slowlog-max-len 128
+```
+
+**Key sizing estimates:**
+- Each event in the queue: ~1-5 KB (depends on payload size)
+- Each dedupe key: ~100 bytes (expires after TTL)
+- Event index hash: ~1-5 KB per event (grows unbounded — plan retention)
+- At 10,000 events/day: ~50-250 MB/day in stream + index storage
+
+**Redis memory monitoring:**
+```bash
+# Check memory usage
+redis-cli INFO memory
+
+# Check stream lengths
+redis-cli XLEN oschema:queue
+redis-cli XLEN oschema:events:shopify
+redis-cli XLEN oschema:deadletter
+
+# Check pending messages (unprocessed)
+redis-cli XPENDING oschema:queue oschema-workers
+
+# Check dedupe key count
+redis-cli DBSIZE
+```
+
+### Environment Variables
+
+All configuration can be set via environment variables (recommended for containers):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OSCHEMA_PORT` | `8080` | HTTP server port |
+| `OSCHEMA_REDIS_URL` | `redis://localhost:6379` | Redis connection string |
+| `OSCHEMA_SPECS_DIR` | *(embedded)* | Path to additional YAML specs |
+| `OSCHEMA_WORKERS` | `4` | Number of queue worker goroutines |
+| `OSCHEMA_MAX_RETRIES` | `5` | Max retry attempts before dead-lettering |
+| `OSCHEMA_DEDUPE_TTL` | `24h` | How long to remember processed event IDs |
+
+**Redis URL formats:**
+```bash
+# Local
+OSCHEMA_REDIS_URL=redis://localhost:6379
+
+# With password
+OSCHEMA_REDIS_URL=redis://:your-password@redis-host:6379
+
+# With database number
+OSCHEMA_REDIS_URL=redis://:password@host:6379/2
+
+# TLS (Elasticache, Upstash, etc.)
+OSCHEMA_REDIS_URL=rediss://:password@host:6380
+```
+
+### Monitoring & Observability
+
+#### Key Metrics to Track
+
+| Metric | How to Check | Alert Threshold |
+|--------|-------------|-----------------|
+| Queue depth | `XLEN oschema:queue` | > 10,000 (workers falling behind) |
+| Dead letter count | `XLEN oschema:deadletter` | > 0 (events failing permanently) |
+| Pending messages | `XPENDING oschema:queue oschema-workers` | > 1,000 (consumers stalled) |
+| Dedupe keys | `redis-cli DBSIZE` | Unexpected growth |
+| Redis memory | `INFO memory` | > 80% of maxmemory |
+| HTTP 5xx rate | nginx/LB metrics | > 1% of requests |
+| Response latency | nginx/LB metrics | p99 > 500ms |
+
+#### Health Check Integration
+
+Use the `/health` endpoint with your monitoring stack:
+
+```bash
+# Simple check
+curl -f http://localhost:8080/health || alert "oschema is down"
+
+# Kubernetes liveness/readiness (see k8s manifest above)
+
+# Docker healthcheck
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+  CMD wget -qO- http://localhost:8080/health || exit 1
+```
+
+#### Log Monitoring
+
+oschema logs to stdout. In production, aggregate logs with your preferred stack:
+
+```bash
+# Docker: logs go to stdout automatically
+docker logs -f oschema
+
+# Kubernetes: use kubectl or a log aggregator (Loki, ELK, Datadog)
+kubectl logs -f deployment/oschema
+
+# Key log patterns to alert on:
+# "dedupe error"       — Redis connection issues
+# "enqueue error"      — Redis stream write failures
+# "process error"      — Worker processing failures
+# "dead letter"        — Events exhausted all retries
+```
+
+### Webhook Provider Setup
+
+When configuring your webhook providers to point at oschema, use these URL patterns:
+
+| Provider | Webhook URL | Notes |
+|----------|------------|-------|
+| Shopify | `https://webhooks.yourdomain.com/ingest/shopify` | Set in Shopify Admin → Notifications |
+| Stripe | `https://webhooks.yourdomain.com/ingest/stripe` | Set in Stripe Dashboard → Webhooks |
+| GitHub | `https://webhooks.yourdomain.com/ingest/github` | Set in repo Settings → Webhooks |
+| Slack | `https://webhooks.yourdomain.com/ingest/slack` | Set in Slack App → Event Subscriptions |
+| Jira | `https://webhooks.yourdomain.com/ingest/jira` | Set in Jira Settings → System → Webhooks |
+| Linear | `https://webhooks.yourdomain.com/ingest/linear` | Set in Linear Settings → API → Webhooks |
+| PagerDuty | `https://webhooks.yourdomain.com/ingest/pagerduty` | Set in PagerDuty → Integrations → Generic Webhooks v3 |
+| SendGrid | `https://webhooks.yourdomain.com/ingest/sendgrid` | Set in SendGrid → Settings → Mail Settings → Event Webhook |
+| Discord | `https://webhooks.yourdomain.com/ingest/discord` | Set in Discord Developer Portal → Interactions Endpoint URL |
+| Twilio | `https://webhooks.yourdomain.com/ingest/twilio` | Set in Twilio Console → Phone Numbers → Webhook URL |
+
+### Disaster Recovery
+
+**Redis data loss:** If Redis data is lost, dedupe keys reset (some duplicates may be processed) and unprocessed queue messages are lost. Events already stored in streams are lost unless Redis persistence was enabled.
+
+**Mitigation:**
+1. Enable Redis AOF persistence (`appendonly yes`)
+2. Take periodic RDB snapshots
+3. For critical workloads, use Redis replication with automatic failover (Redis Sentinel or Redis Cluster)
+4. Monitor `XLEN oschema:deadletter` — dead-lettered events can be replayed once the issue is fixed
+
+**Replaying dead-lettered events:**
+```bash
+# View dead letter contents
+redis-cli XRANGE oschema:deadletter - + COUNT 10
+
+# Move events back to the processing queue (manual recovery)
+# Read each event from deadletter, re-enqueue via the API
+```
+
+### Security Checklist
+
+Before exposing oschema to the internet:
+
+- [ ] TLS termination configured (nginx/Caddy/cloud LB)
+- [ ] Rate limiting enabled at the reverse proxy level
+- [ ] Request body size limited (`client_max_body_size 1m` in nginx)
+- [ ] Redis not exposed to the internet (bind to private network)
+- [ ] Redis password set (`requirepass` in redis.conf)
+- [ ] Only `/ingest/*` and `/health` routes exposed (block everything else)
+- [ ] Firewall rules restrict access to expected webhook source IPs where possible
+- [ ] Monitor dead letter stream for anomalies
+- [ ] Log aggregation and alerting configured
 
 ## License
 
