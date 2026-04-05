@@ -1,0 +1,26 @@
+source: twilio
+version: "2024-01"
+
+# Twilio distinguishes events by URL, not headers
+# For oschema, we use the SmsStatus/MessageStatus field as the event type
+type_field: "SmsStatus"
+
+type_mapping:
+  received: sms.received
+  sent: sms.sent
+  delivered: sms.delivered
+  failed: sms.failed
+  queued: sms.queued
+  undelivered: sms.undelivered
+
+fields:
+  external_id: MessageSid
+  timestamp: ""
+  data:
+    account_sid: AccountSid
+    from: From
+    to: To
+    body: Body
+    message_status: MessageStatus
+    num_media: NumMedia
+    sms_status: SmsStatus

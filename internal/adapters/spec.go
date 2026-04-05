@@ -13,7 +13,8 @@ type FieldMapping struct {
 type AdapterSpec struct {
 	Source      string            `yaml:"source"`
 	Version     string            `yaml:"version"`
-	TypeHeader  string            `yaml:"type_header"`
+	TypeHeader  string            `yaml:"type_header"` // HTTP header containing event type
+	TypeField   string            `yaml:"type_field"`  // JSON body field containing event type (dot-notation)
 	TypeMapping map[string]string `yaml:"type_mapping"`
 	Fields      FieldMapping      `yaml:"fields"`
 }

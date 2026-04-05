@@ -1,0 +1,30 @@
+source: sendgrid
+version: "2024-01"
+
+# SendGrid puts event type in each element's "event" field
+# Note: SendGrid sends arrays, so individual events need pre-processing
+# This spec handles single-event payloads or pre-split array elements
+type_field: "event"
+
+type_mapping:
+  delivered: email.delivered
+  open: email.opened
+  click: email.clicked
+  bounce: email.bounced
+  dropped: email.dropped
+  deferred: email.deferred
+  processed: email.processed
+  spamreport: email.spam_reported
+  unsubscribe: email.unsubscribed
+
+fields:
+  external_id: sg_event_id
+  timestamp: timestamp
+  data:
+    email: email
+    message_id: sg_message_id
+    category: category
+    url: url
+    reason: reason
+    status: status
+    useragent: useragent

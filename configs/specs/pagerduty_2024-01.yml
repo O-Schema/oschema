@@ -1,0 +1,28 @@
+source: pagerduty
+version: "2024-01"
+
+# PagerDuty puts event type in the body at event.event_type
+type_field: "event.event_type"
+
+type_mapping:
+  incident.triggered: incident.triggered
+  incident.acknowledged: incident.acknowledged
+  incident.resolved: incident.resolved
+  incident.escalated: incident.escalated
+  incident.reassigned: incident.reassigned
+  incident.delegated: incident.delegated
+
+fields:
+  external_id: event.data.id
+  timestamp: event.occurred_at
+  data:
+    event_id: event.id
+    title: event.data.title
+    status: event.data.status
+    urgency: event.data.urgency
+    html_url: event.data.html_url
+    service_id: event.data.service.id
+    service_name: event.data.service.name
+    priority: event.data.priority.summary
+    escalation_policy: event.data.escalation_policy.summary
+    created_at: event.data.created_at

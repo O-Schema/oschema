@@ -1,0 +1,28 @@
+source: linear
+version: "2024-01"
+
+# Linear puts event type as action + type in the body
+type_field: "action"
+
+type_mapping:
+  create: issue.created
+  update: issue.updated
+  remove: issue.deleted
+
+fields:
+  external_id: data.id
+  timestamp: data.updatedAt
+  data:
+    identifier: data.identifier
+    title: data.title
+    description: data.description
+    priority: data.priority
+    state: data.state.name
+    assignee: data.assignee.name
+    assignee_email: data.assignee.email
+    team: data.team.name
+    team_key: data.team.key
+    project: data.project.name
+    labels: data.labels
+    created_at: data.createdAt
+    resource_type: type

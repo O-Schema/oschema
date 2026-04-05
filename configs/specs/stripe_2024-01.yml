@@ -1,0 +1,36 @@
+source: stripe
+version: "2024-01"
+
+# Stripe puts event type in the JSON body, not an HTTP header
+type_field: "type"
+
+type_mapping:
+  charge.succeeded: payment.charge_succeeded
+  charge.failed: payment.charge_failed
+  charge.refunded: payment.charge_refunded
+  payment_intent.succeeded: payment.intent_succeeded
+  payment_intent.payment_failed: payment.intent_failed
+  customer.created: customer.created
+  customer.updated: customer.updated
+  customer.deleted: customer.deleted
+  customer.subscription.created: subscription.created
+  customer.subscription.updated: subscription.updated
+  customer.subscription.deleted: subscription.deleted
+  invoice.paid: invoice.paid
+  invoice.payment_failed: invoice.payment_failed
+  invoice.finalized: invoice.finalized
+
+fields:
+  external_id: id
+  timestamp: created
+  data:
+    object_id: data.object.id
+    amount: data.object.amount
+    currency: data.object.currency
+    status: data.object.status
+    customer: data.object.customer
+    email: data.object.email
+    name: data.object.name
+    payment_intent: data.object.payment_intent
+    subscription: data.object.subscription
+    api_version: api_version

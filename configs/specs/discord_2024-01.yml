@@ -1,0 +1,25 @@
+source: discord
+version: "2024-01"
+
+# Discord puts interaction type as numeric "type" field in the body
+type_field: "type"
+
+type_mapping:
+  "1": interaction.ping
+  "2": interaction.application_command
+  "3": interaction.message_component
+  "4": interaction.autocomplete
+  "5": interaction.modal_submit
+
+fields:
+  external_id: id
+  timestamp: timestamp
+  data:
+    application_id: application_id
+    command_id: data.id
+    command_name: data.name
+    guild_id: guild_id
+    channel_id: channel_id
+    user_id: member.user.id
+    username: member.user.username
+    token: token

@@ -62,10 +62,14 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine event type from header
+	// Determine event type from header or body field
 	eventType := ""
 	if spec.TypeHeader != "" {
 		eventType = r.Header.Get(spec.TypeHeader)
+	} else if spec.TypeField != "" {
+		if v := normalization.ExtractField(raw, spec.TypeField); v != nil {
+			eventType = fmt.Sprintf("%v", v)
+		}
 	}
 
 	// Normalize

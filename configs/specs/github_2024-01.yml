@@ -1,0 +1,42 @@
+source: github
+version: "2024-01"
+
+# GitHub puts event type in the X-GitHub-Event header
+type_header: "X-GitHub-Event"
+
+type_mapping:
+  push: repo.push
+  pull_request: repo.pull_request
+  issues: repo.issue
+  release: repo.release
+  star: repo.star
+  create: repo.branch_created
+  delete: repo.branch_deleted
+  fork: repo.forked
+  ping: system.ping
+
+fields:
+  external_id: action
+  timestamp: ""
+  data:
+    action: action
+    repository: repository.full_name
+    sender: sender.login
+    ref: ref
+    before: before
+    after: after
+    number: number
+    pr_title: pull_request.title
+    pr_state: pull_request.state
+    pr_merged: pull_request.merged
+    pr_user: pull_request.user.login
+    pr_head_ref: pull_request.head.ref
+    pr_base_ref: pull_request.base.ref
+    issue_title: issue.title
+    issue_state: issue.state
+    issue_user: issue.user.login
+    release_tag: release.tag_name
+    release_name: release.name
+    release_author: release.author.login
+    head_commit_id: head_commit.id
+    head_commit_message: head_commit.message

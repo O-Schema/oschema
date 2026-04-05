@@ -1,0 +1,32 @@
+source: jira
+version: "2024-01"
+
+# Jira puts event type in the body at webhookEvent
+type_field: "webhookEvent"
+
+type_mapping:
+  "jira:issue_created": issue.created
+  "jira:issue_updated": issue.updated
+  "jira:issue_deleted": issue.deleted
+  "comment_created": issue.comment_created
+  "comment_updated": issue.comment_updated
+  "comment_deleted": issue.comment_deleted
+  "worklog_created": issue.worklog_created
+  "sprint_started": sprint.started
+  "sprint_closed": sprint.closed
+
+fields:
+  external_id: issue.key
+  timestamp: timestamp
+  data:
+    issue_id: issue.id
+    issue_key: issue.key
+    summary: issue.fields.summary
+    status: issue.fields.status.name
+    priority: issue.fields.priority.name
+    issue_type: issue.fields.issuetype.name
+    project_key: issue.fields.project.key
+    assignee: issue.fields.assignee.displayName
+    assignee_email: issue.fields.assignee.emailAddress
+    reporter: issue.fields.reporter.displayName
+    actor: user.displayName

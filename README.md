@@ -77,7 +77,22 @@ redis-server &
 ./oschema serve
 ```
 
-The server starts on port 8080 with the embedded Shopify example spec.
+The server starts on port 8080 with 10 built-in adapter specs.
+
+### Built-in Integrations
+
+| Source | Type Detection | Key Events |
+|--------|---------------|------------|
+| **Shopify** | `X-Shopify-Topic` header | `order.created`, `order.updated`, `product.created` |
+| **Stripe** | `type` body field | `payment.charge_succeeded`, `subscription.created`, `invoice.paid` |
+| **GitHub** | `X-GitHub-Event` header | `repo.push`, `repo.pull_request`, `repo.issue`, `repo.release` |
+| **Slack** | `event.type` body field | `chat.message`, `chat.mention`, `chat.reaction_added` |
+| **Jira** | `webhookEvent` body field | `issue.created`, `issue.updated`, `issue.comment_created` |
+| **Linear** | `action` body field | `issue.created`, `issue.updated`, `issue.deleted` |
+| **PagerDuty** | `event.event_type` body field | `incident.triggered`, `incident.acknowledged`, `incident.resolved` |
+| **SendGrid** | `event` body field | `email.delivered`, `email.bounced`, `email.opened`, `email.clicked` |
+| **Discord** | `type` body field | `interaction.application_command`, `interaction.message_component` |
+| **Twilio** | `SmsStatus` body field | `sms.received`, `sms.delivered`, `sms.failed` |
 
 ### Send a Test Webhook
 

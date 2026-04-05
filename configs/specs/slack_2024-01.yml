@@ -1,0 +1,33 @@
+source: slack
+version: "2024-01"
+
+# Slack puts event type in the body at event.type
+type_field: "event.type"
+
+type_mapping:
+  message: chat.message
+  app_mention: chat.mention
+  reaction_added: chat.reaction_added
+  reaction_removed: chat.reaction_removed
+  member_joined_channel: channel.member_joined
+  member_left_channel: channel.member_left
+  channel_created: channel.created
+  channel_deleted: channel.deleted
+  channel_rename: channel.renamed
+  team_join: team.member_joined
+
+fields:
+  external_id: event_id
+  timestamp: event_time
+  data:
+    team_id: team_id
+    app_id: api_app_id
+    user: event.user
+    channel: event.channel
+    text: event.text
+    ts: event.ts
+    channel_type: event.channel_type
+    reaction: event.reaction
+    subtype: event.subtype
+    item_type: event.item.type
+    item_channel: event.item.channel
