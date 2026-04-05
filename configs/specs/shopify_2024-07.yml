@@ -1,0 +1,15 @@
+source: shopify
+version: "2024-07"
+type_header: "X-Shopify-Topic"
+type_mapping:
+  orders/create: order.created
+  orders/updated: order.updated
+  products/create: product.created
+fields:
+  external_id: id
+  timestamp: created_at
+  data:
+    order_id: id
+    total: total_price
+    customer_email: customer.email
+    line_items: line_items
