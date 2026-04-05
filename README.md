@@ -1,6 +1,10 @@
-# oschema
+<p align="center">
+  <img src="assets/logo.png" alt="oschema logo" width="600">
+</p>
 
-An open, spec-driven ingestion engine that normalizes data from webhooks and external APIs into a unified schema.
+<p align="center">
+  An open, spec-driven ingestion engine that normalizes data from webhooks and external APIs into a unified schema.
+</p>
 
 ## What is oschema?
 
