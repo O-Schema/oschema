@@ -4,17 +4,34 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/O-Schema/oschema/internal/adapters"
+	"github.com/O-Schema/oschema/internal/metrics"
 	"github.com/O-Schema/oschema/internal/normalization"
 	"github.com/O-Schema/oschema/pkg/event"
 )
 
+// writeJSON writes a JSON response with the given status code.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+// writeError writes a JSON error response.
+func writeError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	fmt.Fprintf(w, `{"error":%q}`, msg)
+}
+
 // Deduplicator checks for duplicate events.
 type Deduplicator interface {
 	IsDuplicate(ctx context.Context, source, externalID string) (bool, error)
+	Clear(ctx context.Context, source, externalID string)
 }
 
 // Enqueuer adds events to the processing queue.
@@ -22,14 +39,19 @@ type Enqueuer interface {
 	Enqueue(ctx context.Context, evt *event.Event) error
 }
 
+// SpecResolver resolves adapter specs by source and version.
+type SpecResolver interface {
+	Resolve(source, version string) (*adapters.AdapterSpec, error)
+}
+
 // Handler handles webhook ingestion requests.
 type Handler struct {
-	registry *adapters.SpecRegistry
+	registry SpecResolver
 	dedupe   Deduplicator
 	queue    Enqueuer
 }
 
-func NewHandler(registry *adapters.SpecRegistry, dedupe Deduplicator, queue Enqueuer) *Handler {
+func NewHandler(registry SpecResolver, dedupe Deduplicator, queue Enqueuer) *Handler {
 	return &Handler{
 		registry: registry,
 		dedupe:   dedupe,
@@ -40,15 +62,15 @@ func NewHandler(registry *adapters.SpecRegistry, dedupe Deduplicator, queue Enqu
 func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 	source := r.PathValue("source")
 	if source == "" {
-		http.Error(w, `{"error":"source is required"}`, http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "source is required")
 		return
 	}
 
-	// Parse body (limit to 1MB to prevent OOM)
+	// Read raw body (limit to 1MB to prevent OOM)
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	var raw map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "request body too large")
 		return
 	}
 
@@ -59,7 +81,25 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 	}
 	spec, err := h.registry.Resolve(source, version)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusNotFound)
+		writeError(w, http.StatusNotFound, "spec not found")
+		return
+	}
+
+	// Verify webhook signature if configured
+	if spec.SignatureHeader != "" && spec.SignatureSecretEnv != "" {
+		sigHeader := r.Header.Get(spec.SignatureHeader)
+		if err := VerifySignature(sigHeader, spec.SignatureSecretEnv, body); err != nil {
+			slog.Warn("signature verification failed", "source", source, "error", err)
+			metrics.SignatureFailures.WithLabelValues(source).Inc()
+			writeError(w, http.StatusUnauthorized, "invalid signature")
+			return
+		}
+	}
+
+	// Parse body
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
@@ -88,8 +128,8 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 	// Normalize
 	evt, err := normalization.Normalize(spec, eventType, raw)
 	if err != nil {
-		log.Printf("normalization error: %v", err)
-		http.Error(w, `{"error":"normalization failed"}`, http.StatusInternalServerError)
+		slog.Error("normalization failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "normalization failed")
 		return
 	}
 
@@ -97,29 +137,28 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 	if evt.ExternalID != "" {
 		dup, err := h.dedupe.IsDuplicate(r.Context(), source, evt.ExternalID)
 		if err != nil {
-			log.Printf("dedupe error: %v", err)
-			http.Error(w, `{"error":"service unavailable"}`, http.StatusServiceUnavailable)
+			slog.Error("dedupe check failed", "error", err)
+			writeError(w, http.StatusServiceUnavailable, "service unavailable")
 			return
 		}
 		if dup {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"status":"duplicate","id":%q}`, evt.ID)
+			metrics.EventsDeduplicated.WithLabelValues(source).Inc()
+			writeJSON(w, http.StatusOK, map[string]string{"status": "duplicate", "id": evt.ID})
 			return
 		}
 	}
 
 	// Enqueue
 	if err := h.queue.Enqueue(r.Context(), evt); err != nil {
-		log.Printf("enqueue error: %v", err)
-		http.Error(w, `{"error":"service unavailable"}`, http.StatusServiceUnavailable)
+		// Clear dedupe key so retries from the webhook source aren't rejected
+		if evt.ExternalID != "" {
+			h.dedupe.Clear(r.Context(), source, evt.ExternalID)
+		}
+		slog.Error("enqueue failed", "error", err)
+		writeError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]string{
-		"status": "accepted",
-		"id":     evt.ID,
-	})
+	metrics.EventsIngested.WithLabelValues(source, evt.Type).Inc()
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "id": evt.ID})
 }

@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/redis/go-redis/v9"
 
 	"github.com/O-Schema/oschema/pkg/event"
+
+	rkeys "github.com/O-Schema/oschema/internal/redis"
 )
 
 // RedisStore persists events using Redis Streams and a hash for lookups.
@@ -25,13 +28,15 @@ func (s *RedisStore) Save(ctx context.Context, evt *event.Event) error {
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
-	streamKey := fmt.Sprintf("oschema:events:%s", evt.Source)
-	pipe := s.rdb.Pipeline()
+	streamKey := rkeys.EventStreamKey(evt.Source)
+	pipe := s.rdb.TxPipeline()
 	pipe.XAdd(ctx, &redis.XAddArgs{
 		Stream: streamKey,
+		MaxLen: 100000,
+		Approx: true,
 		Values: map[string]any{"event": string(data)},
 	})
-	pipe.HSet(ctx, "oschema:event_index", evt.ID, string(data))
+	pipe.HSet(ctx, rkeys.EventIndex, evt.ID, string(data))
 	_, err = pipe.Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store event: %w", err)
@@ -40,7 +45,7 @@ func (s *RedisStore) Save(ctx context.Context, evt *event.Event) error {
 }
 
 func (s *RedisStore) Get(ctx context.Context, id string) (*event.Event, error) {
-	data, err := s.rdb.HGet(ctx, "oschema:event_index", id).Result()
+	data, err := s.rdb.HGet(ctx, rkeys.EventIndex, id).Result()
 	if err == redis.Nil {
 		return nil, fmt.Errorf("event %q not found", id)
 	}
@@ -56,7 +61,7 @@ func (s *RedisStore) Get(ctx context.Context, id string) (*event.Event, error) {
 }
 
 func (s *RedisStore) List(ctx context.Context, source string, limit int) ([]*event.Event, error) {
-	streamKey := fmt.Sprintf("oschema:events:%s", source)
+	streamKey := rkeys.EventStreamKey(source)
 	msgs, err := s.rdb.XRevRangeN(ctx, streamKey, "+", "-", int64(limit)).Result()
 	if err != nil {
 		return nil, fmt.Errorf("list events: %w", err)
@@ -66,10 +71,12 @@ func (s *RedisStore) List(ctx context.Context, source string, limit int) ([]*eve
 	for _, msg := range msgs {
 		data, ok := msg.Values["event"].(string)
 		if !ok {
+			slog.Warn("corrupt stream entry", "stream_id", msg.ID, "reason", "missing event field")
 			continue
 		}
 		var evt event.Event
 		if err := json.Unmarshal([]byte(data), &evt); err != nil {
+			slog.Warn("corrupt stream entry", "stream_id", msg.ID, "error", err)
 			continue
 		}
 		events = append(events, &evt)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	rkeys "github.com/O-Schema/oschema/internal/redis"
 	"github.com/O-Schema/oschema/pkg/event"
 )
 
@@ -60,6 +61,8 @@ func (q *RedisQueue) Enqueue(ctx context.Context, evt *event.Event) error {
 
 	return q.rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: q.config.Stream,
+		MaxLen: 1000000,
+		Approx: true,
 		Values: map[string]any{"event": string(data)},
 	}).Err()
 }
@@ -114,7 +117,9 @@ func (q *RedisQueue) DeadLetter(ctx context.Context, evt *event.Event, reason st
 	}
 
 	return q.rdb.XAdd(ctx, &redis.XAddArgs{
-		Stream: "oschema:deadletter",
+		Stream: rkeys.DeadLetterStream,
+		MaxLen: 10000,
+		Approx: true,
 		Values: map[string]any{
 			"event":  string(data),
 			"reason": reason,
@@ -129,6 +134,14 @@ func (q *RedisQueue) RetryDelay(attempt int) time.Duration {
 		delay *= 2
 	}
 	return delay
+}
+
+// AckBatch acknowledges multiple messages in a single call.
+func (q *RedisQueue) AckBatch(ctx context.Context, streamIDs ...string) error {
+	if len(streamIDs) == 0 {
+		return nil
+	}
+	return q.rdb.XAck(ctx, q.config.Stream, q.config.Group, streamIDs...).Err()
 }
 
 // MaxRetries returns the configured max retries.

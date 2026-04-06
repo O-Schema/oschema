@@ -3,7 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,14 +11,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 
-	specs "github.com/O-Schema/oschema/configs/specs"
-	"github.com/O-Schema/oschema/internal/adapters"
 	"github.com/O-Schema/oschema/internal/dedupe"
 	"github.com/O-Schema/oschema/internal/ingestion"
 	"github.com/O-Schema/oschema/internal/queue"
+	rkeys "github.com/O-Schema/oschema/internal/redis"
 	"github.com/O-Schema/oschema/internal/store"
 )
 
@@ -36,52 +35,47 @@ func newServeCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "Start the ingestion server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Redis
-			opt, err := redis.ParseURL(redisURL)
-			if err != nil {
-				return fmt.Errorf("invalid redis URL: %w", err)
-			}
-			rdb := redis.NewClient(opt)
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			if err := rdb.Ping(ctx).Err(); err != nil {
-				cancel()
-				return fmt.Errorf("redis connection failed: %w", err)
-			}
-			cancel()
-			log.Println("connected to Redis")
+			slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
-			// Load specs
-			reg := adapters.NewRegistry()
-			if err := reg.LoadFS(specs.Embedded); err != nil {
-				return fmt.Errorf("load embedded specs: %w", err)
+			rdb, err := newRedisClient(redisURL)
+			if err != nil {
+				return err
 			}
-			if specsDir != "" {
-				if err := reg.LoadDir(specsDir); err != nil {
-					return fmt.Errorf("load specs dir: %w", err)
-				}
+			defer rdb.Close()
+			slog.Info("connected to Redis")
+
+			reg, err := loadRegistry(specsDir)
+			if err != nil {
+				return err
 			}
 			loaded := reg.List()
-			log.Printf("loaded %d adapter specs", len(loaded))
+			slog.Info("specs loaded", "count", len(loaded))
 			for _, s := range loaded {
-				log.Printf("  %s v%s", s.Source, s.Version)
+				slog.Info("spec registered", "source", s.Source, "version", s.Version)
 			}
 
 			// Components
 			dedup := dedupe.NewRedisDeduplicator(rdb, dedupeTTL)
 			eventStore := store.NewRedisStore(rdb)
-			q := queue.NewRedisQueue(rdb, queue.Config{
-				Stream:     "oschema:queue",
-				Group:      "oschema-workers",
-				Consumer:   fmt.Sprintf("worker-%d", os.Getpid()),
+
+			baseCfg := queue.Config{
+				Stream:     rkeys.QueueStream,
+				Group:      rkeys.QueueGroup,
 				MaxRetries: maxRetries,
 				BaseDelay:  time.Second,
-			})
+			}
+
+			// Queue for HTTP handler (enqueue only)
+			handlerCfg := baseCfg
+			handlerCfg.Consumer = fmt.Sprintf("server-%d", os.Getpid())
+			q := queue.NewRedisQueue(rdb, handlerCfg)
 
 			handler := ingestion.NewHandler(reg, dedup, q)
 
 			// HTTP server
 			mux := http.NewServeMux()
 			mux.HandleFunc("POST /ingest/{source}", handler.Ingest)
+			mux.Handle("GET /metrics", promhttp.Handler())
 			mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				fmt.Fprint(w, `{"status":"ok"}`)
@@ -94,14 +88,6 @@ func newServeCmd() *cobra.Command {
 				ReadTimeout:       30 * time.Second,
 				WriteTimeout:      30 * time.Second,
 				IdleTimeout:       120 * time.Second,
-			}
-
-			// Build shared queue config
-			baseCfg := queue.Config{
-				Stream:     "oschema:queue",
-				Group:      "oschema-workers",
-				MaxRetries: maxRetries,
-				BaseDelay:  time.Second,
 			}
 
 			// Start workers
@@ -126,20 +112,21 @@ func newServeCmd() *cobra.Command {
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 			go func() {
-				log.Printf("oschema server listening on :%d", port)
+				slog.Info("server listening", "port", port)
 				if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-					log.Fatalf("server error: %v", err)
+					slog.Error("server error", "error", err)
+					os.Exit(1)
 				}
 			}()
 
 			<-sigCh
-			log.Println("shutting down...")
+			slog.Info("shutting down")
 
 			// Stop accepting new requests first
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer shutdownCancel()
 			if err := srv.Shutdown(shutdownCtx); err != nil {
-				log.Printf("http shutdown error: %v", err)
+				slog.Error("http shutdown error", "error", err)
 			}
 
 			// Then drain workers

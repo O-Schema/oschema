@@ -107,6 +107,27 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
+func TestNormalizeRedactRaw(t *testing.T) {
+	spec := &adapters.AdapterSpec{
+		Source:      "test",
+		Version:     "1.0",
+		RedactRaw:   true,
+		TypeMapping: map[string]string{},
+		Fields:      adapters.FieldMapping{Data: map[string]string{"key": "key"}},
+	}
+	raw := map[string]any{"key": "value", "secret": "password123"}
+	evt, err := Normalize(spec, "test.event", raw)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if evt.Raw != nil {
+		t.Error("Raw should be nil when redact_raw is true")
+	}
+	if evt.Data["key"] != "value" {
+		t.Error("Data fields should still be extracted")
+	}
+}
+
 func TestNormalizeUnknownEventType(t *testing.T) {
 	spec := &adapters.AdapterSpec{
 		Source:      "shopify",

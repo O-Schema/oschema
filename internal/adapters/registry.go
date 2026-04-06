@@ -5,21 +5,22 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 )
 
 // SpecRegistry holds loaded adapter specs indexed by source and version.
 type SpecRegistry struct {
-	mu    sync.RWMutex
-	specs map[string]map[string]*AdapterSpec // source -> version -> spec
+	mu     sync.RWMutex
+	specs  map[string]map[string]*AdapterSpec // source -> version -> spec
+	latest map[string]*AdapterSpec            // source -> latest version (cached)
 }
 
 // NewRegistry creates an empty SpecRegistry.
 func NewRegistry() *SpecRegistry {
 	return &SpecRegistry{
-		specs: make(map[string]map[string]*AdapterSpec),
+		specs:  make(map[string]map[string]*AdapterSpec),
+		latest: make(map[string]*AdapterSpec),
 	}
 }
 
@@ -31,6 +32,10 @@ func (r *SpecRegistry) Register(spec *AdapterSpec) {
 		r.specs[spec.Source] = make(map[string]*AdapterSpec)
 	}
 	r.specs[spec.Source][spec.Version] = spec
+	// Update cached latest (lexicographic comparison)
+	if cur, ok := r.latest[spec.Source]; !ok || spec.Version > cur.Version {
+		r.latest[spec.Source] = spec
+	}
 }
 
 // Resolve finds a spec by source and version. If version is empty, returns the latest.
@@ -38,26 +43,23 @@ func (r *SpecRegistry) Resolve(source, version string) (*AdapterSpec, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	versions, ok := r.specs[source]
-	if !ok {
-		return nil, fmt.Errorf("no specs found for source %q", source)
-	}
-
-	if version != "" {
-		spec, ok := versions[version]
+	if version == "" {
+		spec, ok := r.latest[source]
 		if !ok {
-			return nil, fmt.Errorf("version %q not found for source %q", version, source)
+			return nil, fmt.Errorf("no specs found for source %q", source)
 		}
 		return spec, nil
 	}
 
-	// Return latest version (lexicographic sort)
-	keys := make([]string, 0, len(versions))
-	for v := range versions {
-		keys = append(keys, v)
+	versions, ok := r.specs[source]
+	if !ok {
+		return nil, fmt.Errorf("no specs found for source %q", source)
 	}
-	sort.Strings(keys)
-	return versions[keys[len(keys)-1]], nil
+	spec, ok := versions[version]
+	if !ok {
+		return nil, fmt.Errorf("version %q not found for source %q", version, source)
+	}
+	return spec, nil
 }
 
 // List returns all registered specs.

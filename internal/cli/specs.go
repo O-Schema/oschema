@@ -5,9 +5,6 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-
-	specs "github.com/O-Schema/oschema/configs/specs"
-	"github.com/O-Schema/oschema/internal/adapters"
 )
 
 func newSpecsCmd() *cobra.Command {
@@ -26,14 +23,9 @@ func newSpecsListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all loaded adapter specs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			reg := adapters.NewRegistry()
-			if err := reg.LoadFS(specs.Embedded); err != nil {
-				return fmt.Errorf("load embedded specs: %w", err)
-			}
-			if specsDir != "" {
-				if err := reg.LoadDir(specsDir); err != nil {
-					return fmt.Errorf("load specs dir: %w", err)
-				}
+			reg, err := loadRegistry(specsDir)
+			if err != nil {
+				return err
 			}
 
 			list := reg.List()

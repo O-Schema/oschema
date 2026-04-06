@@ -571,8 +571,15 @@ spec:
     - host: webhooks.yourdomain.com
       http:
         paths:
-          - path: /
+          - path: /ingest
             pathType: Prefix
+            backend:
+              service:
+                name: oschema
+                port:
+                  number: 80
+          - path: /health
+            pathType: Exact
             backend:
               service:
                 name: oschema

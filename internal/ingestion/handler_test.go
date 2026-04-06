@@ -28,6 +28,11 @@ func (m *mockDedupe) IsDuplicate(_ context.Context, source, externalID string) (
 	return false, nil
 }
 
+func (m *mockDedupe) Clear(_ context.Context, source, externalID string) {
+	key := source + ":" + externalID
+	delete(m.seen, key)
+}
+
 type mockQueue struct {
 	events []*event.Event
 }

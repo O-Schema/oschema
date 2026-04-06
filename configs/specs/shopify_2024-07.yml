@@ -1,6 +1,9 @@
 source: shopify
 version: "2024-07"
 type_header: "X-Shopify-Topic"
+# Webhook signature verification (set SHOPIFY_WEBHOOK_SECRET env var to enable)
+# signature_header: "X-Shopify-Hmac-Sha256"
+# signature_secret_env: "SHOPIFY_WEBHOOK_SECRET"
 type_mapping:
   orders/create: order.created
   orders/updated: order.updated

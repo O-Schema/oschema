@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 
 	"github.com/O-Schema/oschema/internal/store"
@@ -26,11 +25,12 @@ func newReplayCmd() *cobra.Command {
 				return fmt.Errorf("--source is required")
 			}
 
-			opt, err := redis.ParseURL(redisURL)
+			rdb, err := newRedisClient(redisURL)
 			if err != nil {
-				return fmt.Errorf("invalid redis URL: %w", err)
+				return err
 			}
-			rdb := redis.NewClient(opt)
+			defer rdb.Close()
+
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 

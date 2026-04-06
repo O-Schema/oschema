@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
+	"github.com/O-Schema/oschema/internal/metrics"
+	rkeys "github.com/O-Schema/oschema/internal/redis"
 	"github.com/O-Schema/oschema/internal/store"
 	"github.com/O-Schema/oschema/pkg/event"
 )
@@ -23,11 +25,11 @@ func NewWorker(q *RedisQueue, s store.EventStore) *Worker {
 
 // Run starts the worker loop. It blocks until ctx is cancelled.
 func (w *Worker) Run(ctx context.Context) {
-	log.Printf("worker started (consumer=%s)", w.queue.config.Consumer)
+	slog.Info("worker started", "consumer", w.queue.config.Consumer)
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("worker shutting down")
+			slog.Info("worker shutting down")
 			return
 		default:
 		}
@@ -37,32 +39,33 @@ func (w *Worker) Run(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			log.Printf("dequeue error: %v", err)
+			slog.Error("dequeue failed", "error", err)
 			time.Sleep(time.Second)
 			continue
 		}
 
+		var ackIDs []string
 		for _, msg := range msgs {
-			w.handleMessage(ctx, msg)
+			if id := w.handleMessage(ctx, msg); id != "" {
+				ackIDs = append(ackIDs, id)
+			}
+		}
+		if len(ackIDs) > 0 {
+			if err := w.queue.AckBatch(ctx, ackIDs...); err != nil {
+				slog.Error("batch ack failed", "error", err)
+			}
 		}
 	}
 }
 
-func (w *Worker) handleMessage(ctx context.Context, msg Message) {
+func (w *Worker) handleMessage(ctx context.Context, msg Message) string {
 	err := w.processMessage(ctx, msg.Payload)
 	if err == nil {
-		// Success — ack immediately
-		if ackErr := w.queue.Ack(ctx, msg.StreamID); ackErr != nil {
-			log.Printf("ack error: %v", ackErr)
-		}
-		return
+		return msg.StreamID // ack this one
 	}
 
-	log.Printf("process error (stream_id=%s): %v", msg.StreamID, err)
+	slog.Error("process failed", "stream_id", msg.StreamID, "error", err)
 
-	// Check delivery count from Redis XPENDING to decide retry vs dead-letter.
-	// Since XPENDING per-message is expensive, we use a simpler approach:
-	// track attempts via a Redis counter keyed by stream ID.
 	attempt := w.incrementAttempt(ctx, msg.StreamID)
 	maxRetries := w.queue.MaxRetries()
 	if maxRetries <= 0 {
@@ -70,40 +73,38 @@ func (w *Worker) handleMessage(ctx context.Context, msg Message) {
 	}
 
 	if attempt < maxRetries {
-		// Retry: do NOT ack — leave in pending. Apply backoff delay.
 		delay := w.queue.RetryDelay(attempt)
-		log.Printf("retry %d/%d for stream_id=%s (backoff=%s)", attempt, maxRetries, msg.StreamID, delay)
+		slog.Info("retrying message", "attempt", attempt, "max_retries", maxRetries, "stream_id", msg.StreamID, "backoff", delay)
+		var retryEvt event.Event
+		if jsonErr := json.Unmarshal([]byte(msg.Payload), &retryEvt); jsonErr == nil {
+			metrics.EventsRetried.WithLabelValues(retryEvt.Source).Inc()
+		}
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():
-			return
 		}
-		// Message stays unacked — will be redelivered via XREADGROUP on pending
-		return
+		return "" // don't ack — will be redelivered
 	}
 
 	// Exhausted retries — dead letter
-	log.Printf("dead-lettering stream_id=%s after %d attempts", msg.StreamID, attempt)
+	slog.Warn("dead-lettering message", "stream_id", msg.StreamID, "attempts", attempt)
 	var evt event.Event
 	if jsonErr := json.Unmarshal([]byte(msg.Payload), &evt); jsonErr == nil {
 		if dlErr := w.queue.DeadLetter(ctx, &evt, err.Error()); dlErr != nil {
-			log.Printf("dead-letter error: %v", dlErr)
-			return // Don't ack if dead-letter fails — will be retried
+			slog.Error("dead-letter failed", "error", dlErr)
+			return "" // don't ack if dead-letter fails
 		}
+		metrics.EventsDeadLettered.WithLabelValues(evt.Source).Inc()
 	}
-	// Clean up attempt counter
 	w.clearAttempt(ctx, msg.StreamID)
-	// Ack only after successful dead-lettering
-	if ackErr := w.queue.Ack(ctx, msg.StreamID); ackErr != nil {
-		log.Printf("ack error after dead-letter: %v", ackErr)
-	}
+	return msg.StreamID // ack after successful dead-letter
 }
 
 func (w *Worker) incrementAttempt(ctx context.Context, streamID string) int {
-	key := "oschema:attempts:" + streamID
+	key := rkeys.AttemptPrefix + streamID
 	val, err := w.queue.rdb.Incr(ctx, key).Result()
 	if err != nil {
-		log.Printf("attempt counter error: %v", err)
+		slog.Error("attempt counter failed", "error", err)
 		return 1
 	}
 	// Set TTL on first attempt so counters don't leak
@@ -114,7 +115,7 @@ func (w *Worker) incrementAttempt(ctx context.Context, streamID string) int {
 }
 
 func (w *Worker) clearAttempt(ctx context.Context, streamID string) {
-	key := "oschema:attempts:" + streamID
+	key := rkeys.AttemptPrefix + streamID
 	w.queue.rdb.Del(ctx, key)
 }
 
@@ -126,6 +127,7 @@ func (w *Worker) processMessage(ctx context.Context, payload string) error {
 	if err := w.store.Save(ctx, &evt); err != nil {
 		return fmt.Errorf("store event: %w", err)
 	}
-	log.Printf("stored event id=%s source=%s type=%s", evt.ID, evt.Source, evt.Type)
+	metrics.EventsStored.WithLabelValues(evt.Source).Inc()
+	slog.Info("event stored", "id", evt.ID, "source", evt.Source, "type", evt.Type)
 	return nil
 }

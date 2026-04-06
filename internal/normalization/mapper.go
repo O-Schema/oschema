@@ -61,6 +61,11 @@ func Normalize(spec *adapters.AdapterSpec, sourceEventType string, raw map[strin
 		data[key] = ExtractField(raw, path)
 	}
 
+	var rawPayload map[string]any
+	if !spec.RedactRaw {
+		rawPayload = raw
+	}
+
 	return &event.Event{
 		ID:         uuid.New().String(),
 		Source:     spec.Source,
@@ -69,7 +74,7 @@ func Normalize(spec *adapters.AdapterSpec, sourceEventType string, raw map[strin
 		ExternalID: externalID,
 		Timestamp:  ts,
 		Data:       data,
-		Raw:        raw,
+		Raw:        rawPayload,
 	}, nil
 }
 
