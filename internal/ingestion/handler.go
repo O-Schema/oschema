@@ -44,7 +44,8 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse body
+	// Parse body (limit to 1MB to prevent OOM)
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var raw map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
@@ -68,7 +69,19 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 		eventType = r.Header.Get(spec.TypeHeader)
 	} else if spec.TypeField != "" {
 		if v := normalization.ExtractField(raw, spec.TypeField); v != nil {
-			eventType = fmt.Sprintf("%v", v)
+			switch val := v.(type) {
+			case string:
+				eventType = val
+			case float64:
+				// Handle numeric types (e.g., Discord sends type as integer)
+				if val == float64(int64(val)) {
+					eventType = fmt.Sprintf("%d", int64(val))
+				} else {
+					eventType = fmt.Sprintf("%g", val)
+				}
+			default:
+				eventType = fmt.Sprintf("%v", v)
+			}
 		}
 	}
 

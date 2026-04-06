@@ -1,6 +1,10 @@
 package adapters
 
-import "gopkg.in/yaml.v3"
+import (
+	"errors"
+
+	"gopkg.in/yaml.v3"
+)
 
 // FieldMapping defines how to extract fields from the raw payload.
 type FieldMapping struct {
@@ -19,10 +23,30 @@ type AdapterSpec struct {
 	Fields      FieldMapping      `yaml:"fields"`
 }
 
-// ParseSpec parses a YAML adapter spec from raw bytes.
+// Validate checks that a spec has all required fields.
+func (s *AdapterSpec) Validate() error {
+	if s.Source == "" {
+		return errors.New("spec: source is required")
+	}
+	if s.Version == "" {
+		return errors.New("spec: version is required")
+	}
+	if s.TypeHeader == "" && s.TypeField == "" {
+		return errors.New("spec: one of type_header or type_field is required")
+	}
+	if s.TypeHeader != "" && s.TypeField != "" {
+		return errors.New("spec: cannot set both type_header and type_field")
+	}
+	return nil
+}
+
+// ParseSpec parses and validates a YAML adapter spec from raw bytes.
 func ParseSpec(data []byte) (*AdapterSpec, error) {
 	var spec AdapterSpec
 	if err := yaml.Unmarshal(data, &spec); err != nil {
+		return nil, err
+	}
+	if err := spec.Validate(); err != nil {
 		return nil, err
 	}
 	return &spec, nil

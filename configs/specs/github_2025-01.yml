@@ -22,7 +22,7 @@ type_mapping:
   sub_issues: repo.sub_issues
   issue_types: repo.issue_types
 fields:
-  external_id: action
+  external_id: ""
   timestamp: ""
   data:
     action: action

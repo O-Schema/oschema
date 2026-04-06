@@ -1,10 +1,14 @@
 source: linear
 version: "2024-01"
+# Linear sends action (create/update/remove) for all resource types.
+# The "type" body field distinguishes Issue/Comment/Project etc.
+# This spec maps action values; consumers should check data.resource_type
+# to distinguish Issue vs Comment vs Project events.
 type_field: "action"
 type_mapping:
-  create: issue.created
-  update: issue.updated
-  remove: issue.deleted
+  create: resource.created
+  update: resource.updated
+  remove: resource.deleted
 fields:
   external_id: data.id
   timestamp: data.updatedAt

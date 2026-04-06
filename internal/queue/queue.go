@@ -3,8 +3,9 @@ package queue
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -29,31 +30,25 @@ type Message struct {
 
 // RedisQueue uses Redis Streams for durable event queuing.
 type RedisQueue struct {
-	rdb    *redis.Client
-	config Config
+	rdb      *redis.Client
+	config   Config
+	initOnce sync.Once
+	initErr  error
 }
 
 func NewRedisQueue(rdb *redis.Client, cfg Config) *RedisQueue {
 	return &RedisQueue{rdb: rdb, config: cfg}
 }
 
-// EnsureGroup creates the consumer group if it doesn't exist.
+// EnsureGroup creates the consumer group if it doesn't exist. Safe to call multiple times.
 func (q *RedisQueue) EnsureGroup(ctx context.Context) error {
-	err := q.rdb.XGroupCreateMkStream(ctx, q.config.Stream, q.config.Group, "0").Err()
-	if err != nil && !isGroupExistsErr(err) {
-		return fmt.Errorf("create consumer group: %w", err)
-	}
-	return nil
-}
-
-func isGroupExistsErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, redis.Nil) {
-		return true
-	}
-	return err.Error() == "BUSYGROUP Consumer Group name already exists"
+	q.initOnce.Do(func() {
+		err := q.rdb.XGroupCreateMkStream(ctx, q.config.Stream, q.config.Group, "0").Err()
+		if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+			q.initErr = fmt.Errorf("create consumer group: %w", err)
+		}
+	})
+	return q.initErr
 }
 
 // Enqueue adds an event to the queue stream.

@@ -88,8 +88,20 @@ func newServeCmd() *cobra.Command {
 			})
 
 			srv := &http.Server{
-				Addr:    fmt.Sprintf(":%d", port),
-				Handler: mux,
+				Addr:              fmt.Sprintf(":%d", port),
+				Handler:           mux,
+				ReadHeaderTimeout: 10 * time.Second,
+				ReadTimeout:       30 * time.Second,
+				WriteTimeout:      30 * time.Second,
+				IdleTimeout:       120 * time.Second,
+			}
+
+			// Build shared queue config
+			baseCfg := queue.Config{
+				Stream:     "oschema:queue",
+				Group:      "oschema-workers",
+				MaxRetries: maxRetries,
+				BaseDelay:  time.Second,
 			}
 
 			// Start workers
@@ -99,14 +111,10 @@ func newServeCmd() *cobra.Command {
 				wg.Add(1)
 				go func(id int) {
 					defer wg.Done()
+					cfg := baseCfg
+					cfg.Consumer = fmt.Sprintf("worker-%d-%d", os.Getpid(), id)
 					w := queue.NewWorker(
-						queue.NewRedisQueue(rdb, queue.Config{
-							Stream:     "oschema:queue",
-							Group:      "oschema-workers",
-							Consumer:   fmt.Sprintf("worker-%d-%d", os.Getpid(), id),
-							MaxRetries: maxRetries,
-							BaseDelay:  time.Second,
-						}),
+						queue.NewRedisQueue(rdb, cfg),
 						eventStore,
 					)
 					w.Run(workerCtx)
@@ -126,12 +134,18 @@ func newServeCmd() *cobra.Command {
 
 			<-sigCh
 			log.Println("shutting down...")
-			workerCancel()
-			wg.Wait()
 
+			// Stop accepting new requests first
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer shutdownCancel()
-			return srv.Shutdown(shutdownCtx)
+			if err := srv.Shutdown(shutdownCtx); err != nil {
+				log.Printf("http shutdown error: %v", err)
+			}
+
+			// Then drain workers
+			workerCancel()
+			wg.Wait()
+			return nil
 		},
 	}
 

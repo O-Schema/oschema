@@ -20,7 +20,7 @@ type_mapping:
   deployment_status: deploy.status
   status: repo.commit_status
 fields:
-  external_id: action
+  external_id: ""
   timestamp: ""
   data:
     action: action

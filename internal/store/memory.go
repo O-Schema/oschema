@@ -47,5 +47,8 @@ func (s *MemoryStore) List(_ context.Context, source string, limit int) ([]*even
 	if len(events) > limit {
 		events = events[len(events)-limit:]
 	}
-	return events, nil
+	// Return a copy to prevent callers from mutating internal state
+	result := make([]*event.Event, len(events))
+	copy(result, events)
+	return result, nil
 }

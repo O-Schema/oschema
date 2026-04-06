@@ -2,6 +2,7 @@ package normalization
 
 import (
 	"testing"
+	"time"
 
 	"github.com/O-Schema/oschema/internal/adapters"
 	specs "github.com/O-Schema/oschema/configs/specs"
@@ -57,7 +58,7 @@ func TestNormalizeStripe(t *testing.T) {
 	raw := map[string]any{
 		"id":          "evt_1abc123",
 		"type":        "charge.succeeded",
-		"created":     "1720000000",
+		"created":     float64(1720000000), // Stripe sends Unix epoch as integer
 		"api_version": "2024-01-01",
 		"livemode":    true,
 		"request": map[string]any{
@@ -116,6 +117,11 @@ func TestNormalizeStripe(t *testing.T) {
 	}
 	if evt.ExternalID != "evt_1abc123" {
 		t.Errorf("ExternalID = %q, want %q", evt.ExternalID, "evt_1abc123")
+	}
+	// Timestamp: Unix epoch 1720000000 = 2024-07-03T13:46:40Z
+	expectedTS := time.Date(2024, 7, 3, 9, 46, 40, 0, time.UTC)
+	if !evt.Timestamp.Equal(expectedTS) {
+		t.Errorf("Timestamp = %v, want %v", evt.Timestamp, expectedTS)
 	}
 	// Core fields
 	if evt.Data["object_id"] != "ch_xyz789" {
@@ -387,6 +393,11 @@ func TestNormalizeSlackMessage(t *testing.T) {
 	if evt.ExternalID != "Ev0123ABCD" {
 		t.Errorf("ExternalID = %q, want %q", evt.ExternalID, "Ev0123ABCD")
 	}
+	// Slack event_time is Unix epoch integer
+	expectedSlackTS := time.Date(2024, 7, 3, 9, 46, 40, 0, time.UTC)
+	if !evt.Timestamp.Equal(expectedSlackTS) {
+		t.Errorf("Timestamp = %v, want %v", evt.Timestamp, expectedSlackTS)
+	}
 	if evt.Data["user"] != "U12345" {
 		t.Errorf("Data[user] = %v, want %q", evt.Data["user"], "U12345")
 	}
@@ -470,6 +481,11 @@ func TestNormalizeJiraIssueCreated(t *testing.T) {
 	if evt.ExternalID != "PROJ-123" {
 		t.Errorf("ExternalID = %q, want %q", evt.ExternalID, "PROJ-123")
 	}
+	// Jira timestamp is epoch milliseconds: 1720000000000 = 2024-07-03T13:46:40Z
+	expectedJiraTS := time.Date(2024, 7, 3, 9, 46, 40, 0, time.UTC)
+	if !evt.Timestamp.Equal(expectedJiraTS) {
+		t.Errorf("Timestamp = %v, want %v", evt.Timestamp, expectedJiraTS)
+	}
 	if evt.Data["summary"] != "Fix login bug" {
 		t.Errorf("Data[summary] = %v", evt.Data["summary"])
 	}
@@ -510,8 +526,8 @@ func TestNormalizeLinearIssueCreated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
-	if evt.Type != "issue.created" {
-		t.Errorf("Type = %q, want %q", evt.Type, "issue.created")
+	if evt.Type != "resource.created" {
+		t.Errorf("Type = %q, want %q", evt.Type, "resource.created")
 	}
 	if evt.ExternalID != "uuid-linear-001" {
 		t.Errorf("ExternalID = %q, want %q", evt.ExternalID, "uuid-linear-001")

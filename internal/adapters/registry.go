@@ -46,11 +46,7 @@ func (r *SpecRegistry) Resolve(source, version string) (*AdapterSpec, error) {
 	if version != "" {
 		spec, ok := versions[version]
 		if !ok {
-			available := make([]string, 0, len(versions))
-			for v := range versions {
-				available = append(available, v)
-			}
-			return nil, fmt.Errorf("version %q not found for source %q (available: %s)", version, source, strings.Join(available, ", "))
+			return nil, fmt.Errorf("version %q not found for source %q", version, source)
 		}
 		return spec, nil
 	}
